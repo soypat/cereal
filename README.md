@@ -1,7 +1,10 @@
 # cereal
 Serial port abstraction creation for bugst, sers, goburrow and tarm serial libraries.
 
-This can make it easier to diagnose if a bug is an issue with a certain library or not.
+This allows for:
+- Easily diagnosing if a bug is an issue with a certain library or not.
+- Modularizing a program so that the underlying serial implementation can be 
+easily swapped out
 
 ## Example
 
