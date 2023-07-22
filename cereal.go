@@ -11,70 +11,13 @@ import (
 	bugst "go.bug.st/serial"
 )
 
-// StopBits is the number of stop bits to use- is a enum so use package defined
-// StopBits1, StopBits1Half, StopBits2.
-type StopBits byte
-
-const (
-	StopBits1     = StopBits(bugst.OneStopBit)
-	StopBits1Half = StopBits(bugst.OnePointFiveStopBits)
-	StopBits2     = StopBits(bugst.TwoStopBits)
-)
-
-func (s StopBits) Halves() (halves int) {
-	switch s {
-	case StopBits1:
-		halves = 2
-	case StopBits1Half:
-		halves = 3
-	case StopBits2:
-		halves = 4
-	}
-	return halves
-}
-
-// Parity is the type of parity to use- is a enum so use package defined
-// ParityNone, ParityOdd, ParityEven, ParityMark, ParitySpace.
-type Parity byte
-
-const (
-	ParityNone  = Parity(bugst.NoParity)
-	ParityOdd   = Parity(bugst.OddParity)
-	ParityEven  = Parity(bugst.EvenParity)
-	ParityMark  = Parity(bugst.MarkParity)
-	ParitySpace = Parity(bugst.SpaceParity)
-)
-
-// Mode is the configuration for the serial port.
-type Mode struct {
-	BaudRate int
-	// DataBits 5, 6, 7, 8. If Zero then 8 is used.
-	DataBits int
-	Parity   Parity
-	StopBits StopBits
-}
-
-func (p Parity) Char() (char byte) {
-	switch p {
-	case ParityNone:
-		char = 'N'
-	case ParityOdd:
-		char = 'O'
-	case ParityEven:
-		char = 'E'
-	case ParityMark:
-		char = 'M'
-	case ParitySpace:
-		char = 'S'
-	}
-	return char
-}
-
 // Opener is an interface for working with serial port libraries to be able
 // to easily interchange them.
 //
 // It is implemented by the various serial port libraries in this package for convenience.
 type Opener interface {
+	// OpenPort opens a serial port with the given name and mode.
+	// portname is the name of the port to open, e.g. "/dev/ttyUSB0" or "COM1".
 	OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error)
 }
 
@@ -135,17 +78,8 @@ func (Goburrow) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error)
 		Address:  portname,
 		BaudRate: mode.BaudRate,
 		DataBits: mode.DataBits,
-		StopBits: func() int {
-			switch mode.StopBits {
-			case StopBits1:
-				return 1
-			case StopBits2:
-				return 2
-			default:
-				return 1
-			}
-		}(),
-		Parity: string(mode.Parity.Char()),
+		StopBits: mode.StopBits.Halves() / 2,
+		Parity:   string(mode.Parity.Char()),
 	})
 
 }
