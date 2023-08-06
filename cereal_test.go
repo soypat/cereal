@@ -49,3 +49,13 @@ func ExampleOpener() {
 		time.Sleep(time.Second)
 	}
 }
+
+func ExampleForEachPort() {
+	err := cereal.ForEachPort(func(port cereal.PortDetails) (bool, error) {
+		log.Printf("%v\n", port) // Log all port details.
+		return false, nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}

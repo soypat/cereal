@@ -3,13 +3,21 @@ package cereal
 import (
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/distributed/sers"
 	goburrow "github.com/goburrow/serial"
 
 	tarm "github.com/tarm/serial"
 	bugst "go.bug.st/serial"
+	"go.bug.st/serial/enumerator"
 )
+
+type PortDetails struct {
+	Name     string
+	VID, PID uint16
+	IsUSB    bool
+}
 
 // Opener is an interface for working with serial port libraries to be able
 // to easily interchange them.
@@ -19,6 +27,31 @@ type Opener interface {
 	// OpenPort opens a serial port with the given name and mode.
 	// portname is the name of the port to open, e.g. "/dev/ttyUSB0" or "COM1".
 	OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error)
+}
+
+// ForEachPort calls the given function for each serial port found.
+//
+// ForEachPort returns early with fn's error if fn returns an error or
+// if halt is true.
+func ForEachPort(fn func(details PortDetails) (halt bool, err error)) error {
+	portlist, err := enumerator.GetDetailedPortsList()
+	if err != nil {
+		return err
+	}
+	for _, port := range portlist {
+		vid, _ := strconv.ParseUint(port.VID, 16, 16)
+		pid, _ := strconv.ParseUint(port.PID, 16, 16)
+		halt, err := fn(PortDetails{
+			Name:  port.Name,
+			VID:   uint16(vid),
+			PID:   uint16(pid),
+			IsUSB: port.IsUSB,
+		})
+		if err != nil || halt {
+			return err
+		}
+	}
+	return nil
 }
 
 // Bugst implements the Opener interface for the go.bug.st/serial package.
