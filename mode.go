@@ -1,6 +1,27 @@
 package cereal
 
-import bugst "go.bug.st/serial"
+import (
+	"errors"
+	"time"
+
+	bugst "go.bug.st/serial"
+)
+
+// Mode is the configuration for the serial port.
+type Mode struct {
+	BaudRate int
+	// DataBits 5, 6, 7, 8. If Zero then 8 is used.
+	DataBits int
+	// ReadTimeout is the maximum time to wait for a read to complete.
+	// May not be implemented on all platforms or Opener implementations.
+	ReadTimeout time.Duration
+	Parity      Parity
+	StopBits    StopBits
+}
+
+var (
+	errReadTimeoutUnsupportedBugst = errors.New("read timeout not supported for Opener implementation. Use a different Opener")
+)
 
 // StopBits is the number of stop bits to use- is a enum so use package defined
 // StopBits1, StopBits1Half, StopBits2.
@@ -69,15 +90,6 @@ func (p Parity) String() (s string) {
 		s = "Unknown"
 	}
 	return s
-}
-
-// Mode is the configuration for the serial port.
-type Mode struct {
-	BaudRate int
-	// DataBits 5, 6, 7, 8. If Zero then 8 is used.
-	DataBits int
-	Parity   Parity
-	StopBits StopBits
 }
 
 func (p Parity) Char() (char byte) {

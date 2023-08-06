@@ -13,12 +13,6 @@ import (
 	"go.bug.st/serial/enumerator"
 )
 
-type PortDetails struct {
-	Name     string
-	VID, PID uint16
-	IsUSB    bool
-}
-
 // Opener is an interface for working with serial port libraries to be able
 // to easily interchange them.
 //
@@ -27,6 +21,13 @@ type Opener interface {
 	// OpenPort opens a serial port with the given name and mode.
 	// portname is the name of the port to open, e.g. "/dev/ttyUSB0" or "COM1".
 	OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error)
+}
+
+// PortDetails contains OS provided information on a USB or Serial port.
+type PortDetails struct {
+	Name     string
+	VID, PID uint16
+	IsUSB    bool
 }
 
 // ForEachPort calls the given function for each serial port found.
@@ -61,6 +62,9 @@ func (Bugst) String() string      { return "bugst" }
 func (Bugst) PackagePath() string { return "go.bug.st/serial" }
 
 func (Bugst) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
+	if mode.ReadTimeout != 0 {
+		return nil, errReadTimeoutUnsupportedBugst
+	}
 	return bugst.Open(portname, &bugst.Mode{
 		BaudRate: mode.BaudRate,
 		DataBits: mode.DataBits,
@@ -78,10 +82,11 @@ func (Tarm) PackagePath() string { return "github.com/tarm/serial" }
 func (Tarm) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 	var parity tarm.Parity = tarm.Parity(mode.Parity.Char())
 	return tarm.OpenPort(&tarm.Config{
-		Name:   portname,
-		Baud:   mode.BaudRate,
-		Size:   byte(mode.DataBits),
-		Parity: parity,
+		Name:        portname,
+		Baud:        mode.BaudRate,
+		Size:        byte(mode.DataBits),
+		Parity:      parity,
+		ReadTimeout: mode.ReadTimeout,
 		StopBits: func() tarm.StopBits {
 			switch mode.StopBits {
 			case StopBits1:
@@ -113,6 +118,7 @@ func (Goburrow) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error)
 		DataBits: mode.DataBits,
 		StopBits: mode.StopBits.Halves() / 2,
 		Parity:   string(mode.Parity.Char()),
+		Timeout:  mode.ReadTimeout,
 	})
 
 }
@@ -127,6 +133,12 @@ func (Sers) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 	sp, err := sers.Open(portname)
 	if err != nil {
 		return nil, err
+	}
+	if mode.ReadTimeout != 0 {
+		err = sp.SetReadParams(0, mode.ReadTimeout.Seconds())
+		if err != nil {
+			return nil, err
+		}
 	}
 	var parity, stopbits, databits int
 	if databits == 0 {
