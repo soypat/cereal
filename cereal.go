@@ -130,7 +130,7 @@ func (Sers) String() string      { return "sers" }
 func (Sers) PackagePath() string { return "github.com/distributed/sers" }
 
 func (Sers) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
-	sp, err := sers.Open(portname)
+	sp, err := openSers(portname)
 	if err != nil {
 		return nil, err
 	}
