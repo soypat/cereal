@@ -110,7 +110,7 @@ func TestNonBlockingBlocked(t *testing.T) {
 	}
 
 	nb := cereal.NewNonBlocking(rwc, cereal.NonBlockingConfig{
-		Timeout: timeout,
+		ReadTimeout: timeout,
 	})
 	// This call should fail with deadline exceeded.
 	buf := make([]byte, len(data))
@@ -144,7 +144,7 @@ func TestNonBlockingReset(t *testing.T) {
 	}
 
 	nb := cereal.NewNonBlocking(rwc, cereal.NonBlockingConfig{
-		Timeout: timeout,
+		ReadTimeout: timeout,
 	})
 	// This call should fail with deadline exceeded.
 	buf := make([]byte, len(data))

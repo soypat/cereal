@@ -32,14 +32,14 @@ type NonBlocking struct {
 
 // NonBlockingConfig is used to configure the creation of a NonBlocking instance.
 type NonBlockingConfig struct {
-	// Timeout will define the timeout to wait on a Read call before returning deadline exceeded error.
-	// If Timeout is zero then Read calls will return immediately and only have an error if the Reader
+	// ReadTimeout will define the timeout to wait on a Read call before returning deadline exceeded error.
+	// If ReadTimeout is zero then Read calls will return immediately and only have an error if the Reader
 	// was closed or EOFed.
-	Timeout time.Duration
-	// MaxBuffered specifies the maximum amount of bytes to have buffered in our reader.
-	// After MaxBuffered is reached a NonBlocking will sleep until the caller has read bytes
+	ReadTimeout time.Duration
+	// MaxReadBuffered specifies the maximum amount of bytes to have buffered in our reader.
+	// After MaxReadBuffered is reached a NonBlocking will sleep until the caller has read bytes
 	// and made space for more reads. If set to zero no limit will be placed on buffer size.
-	MaxBuffered int
+	MaxReadBuffered int
 }
 
 // NewNonBlocking creates a [NonBlocking] instance with the given configuration parameters.
@@ -49,13 +49,13 @@ func NewNonBlocking(rwc io.ReadWriteCloser, cfg NonBlockingConfig) *NonBlocking 
 	if rwc == nil {
 		panic("nil ReadWriteCloser passed into NewNonBlocking")
 	}
-	if cfg.Timeout < 0 || cfg.MaxBuffered < 0 {
+	if cfg.ReadTimeout < 0 || cfg.MaxReadBuffered < 0 {
 		panic("invalid argument to NewNonBlocking")
 	}
 	nb := &NonBlocking{
 		io:             rwc,
-		defaultTimeout: cfg.Timeout,
-		maxBuffered:    cfg.MaxBuffered,
+		defaultTimeout: cfg.ReadTimeout,
+		maxBuffered:    cfg.MaxReadBuffered,
 	}
 	go func() {
 		const busySleep = 256 * time.Millisecond
