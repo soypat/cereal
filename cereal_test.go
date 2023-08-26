@@ -64,7 +64,8 @@ func ExampleForEachPort() {
 	}
 }
 
-func TestNonBlocking(t *testing.T) {
+func TestNonBlockingRead(t *testing.T) {
+	t.Parallel()
 	var data [1024]byte
 	for i := range data {
 		data[i] = byte(rand.Intn(256))
@@ -83,17 +84,77 @@ func TestNonBlocking(t *testing.T) {
 		nn, err := nb.Read(smallbuf[:])
 		got := smallbuf[:nn]
 		expect := data[n : n+nn]
+		n += nn
 		if !bytes.Equal(got, expect) {
 			t.Fatalf("mismatch in data read:\n%q\n%q", got, expect)
 		}
-		if err != nil {
+		if err != nil && n != len(data) {
 			t.Error(err)
 			break
 		}
 	}
 }
 
+func TestNonBlockingBlocked(t *testing.T) {
+	t.Parallel()
+	const (
+		block   = 200 * time.Millisecond
+		timeout = time.Millisecond
+		data    = "hello partner!"
+	)
+	rwc := &readwritecloser{
+		read: func(b []byte) (int, error) {
+			time.Sleep(block)
+			return copy(b, data), nil
+		},
+	}
+
+	nb := cereal.NewNonBlocking(rwc, cereal.NonBlockingConfig{
+		Timeout: timeout,
+	})
+	// This call should fail with deadline exceeded.
+	buf := make([]byte, len(data))
+	n, err := nb.Read(buf)
+	if n != 0 || err == nil {
+		t.Fatal("unexpected NonBlocking behaviour", n, err)
+	}
+	time.Sleep(block - timeout)
+	n, err = nb.Read(buf)
+	if n != len(buf) || err != nil {
+		t.Fatal("expected to read blocked data", n, err)
+	}
+
+	if string(buf) != data {
+		t.Errorf("expected %q; got %q", data, buf)
+	}
+}
+
 type nop struct {
 	io.ReadWriter
 	io.Closer
+}
+
+type readwritecloser struct {
+	read, write func([]byte) (int, error)
+	close       func() error
+}
+
+func (rwc *readwritecloser) Read(b []byte) (int, error) {
+	if rwc.read == nil {
+		panic("nill read callback")
+	}
+	return rwc.read(b)
+}
+func (rwc *readwritecloser) Write(b []byte) (int, error) {
+	if rwc.write == nil {
+		return len(b), nil
+	}
+	return rwc.write(b)
+}
+
+func (rwc *readwritecloser) Close() error {
+	if rwc.close == nil {
+		return nil
+	}
+	return rwc.close()
 }

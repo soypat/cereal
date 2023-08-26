@@ -27,7 +27,7 @@ type NonBlocking struct {
 	maxBuffered    int
 	mu             sync.Mutex
 	buf            bytes.Buffer
-	err            error
+	errfield       error
 }
 
 // NonBlockingConfig is used to configure the creation of a NonBlocking instance.
@@ -62,7 +62,7 @@ func NewNonBlocking(rwc io.ReadWriteCloser, cfg NonBlockingConfig) *NonBlocking 
 	go func() {
 		const busySleep = 256 * time.Millisecond
 		var buf [1024]byte
-		for nb.Err() == nil {
+		for nb.err() == nil {
 			if nb.maxBuffered != 0 && nb.Buffered() > nb.maxBuffered {
 				time.Sleep(busySleep) // This busy sleep is to not blow up our buffer.
 				continue
@@ -94,17 +94,21 @@ func (nb *NonBlocking) Write(b []byte) (int, error) {
 
 // Read implements the [io.Reader] interface. Will call NonBlocking.ReadDeadline with the set timeout.
 func (nb *NonBlocking) Read(b []byte) (int, error) {
-	return nb.ReadDeadline(b, time.Now().Add(nb.defaultTimeout))
+	deadline := time.Now().Add(nb.defaultTimeout)
+	return nb.ReadDeadline(b, deadline)
 }
 
+// ReadDeadline reads from the underlying buffer up untile deadline.
 func (nb *NonBlocking) ReadDeadline(b []byte, deadline time.Time) (n int, err error) {
 	for err == nil && n < len(b) {
 		var nn int
 		nn, err = nb.readNext(b[n:], deadline)
 		n += nn
 	}
-	if nb.Err() != nil && err == nil {
-		err = nb.Err() // Early setting of the error if the reader has failed.
+	if nb.err() != nil && n == 0 && err == nil {
+		// Early setting of the error if the reader has failed and no more bytes are being read.
+		// This means that the reader is likely done.
+		err = nb.err()
 	}
 	return n, err
 }
@@ -115,7 +119,7 @@ func (nb *NonBlocking) readNext(b []byte, deadline time.Time) (int, error) {
 		until := time.Until(deadline)
 		if until < 0 {
 			return 0, errDeadlineExceeded
-		} else if err := nb.Err(); err != nil {
+		} else if err := nb.err(); err != nil {
 			return 0, err // Our reader failed, no recovery so just exit.
 		}
 		time.Sleep(minD(100*time.Millisecond, until))
@@ -124,9 +128,13 @@ func (nb *NonBlocking) readNext(b []byte, deadline time.Time) (int, error) {
 	nb.mu.Lock()
 	defer nb.mu.Unlock()
 	if nb.buf.Len() == 0 {
-		return 0, errors.New("race condition in ReadDeadline")
+		// There was a race to read buf and we lost.
+		// This can happen if there are multiple callers to ReadDeadline.
+		return 0, nil
 	}
-	return nb.buf.Read(b)
+	// We ignore io.EOF returned by buffer since unless goroutine is done it is not really EOF.
+	n, _ = nb.buf.Read(b)
+	return n, nil
 }
 
 // Buffered returns the amount of bytes in the underlying buffer.
@@ -136,22 +144,23 @@ func (nb *NonBlocking) Buffered() int {
 	return nb.buf.Len()
 }
 
-// Close terminates to reader and writer.
+// Close terminates to reader and writer. Sets [io.EOF] as the returned error for future Read calls.
 func (nb *NonBlocking) Close() error {
-	nb.setErr(errors.New("ReaderWriter closed"))
+	nb.setErr(io.EOF)
 	return nb.io.Close()
 }
 
-func (nb *NonBlocking) Err() error {
+// err returns error set by setErr. If err is set read goroutine is done or in process of ending.
+func (nb *NonBlocking) err() error {
 	nb.mu.Lock()
 	defer nb.mu.Unlock()
-	return nb.err
+	return nb.errfield
 }
 
 func (nb *NonBlocking) setErr(err error) {
 	nb.mu.Lock()
 	defer nb.mu.Unlock()
-	nb.err = err
+	nb.errfield = err
 }
 
 func minD(a, b time.Duration) time.Duration {
