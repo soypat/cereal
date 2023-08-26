@@ -33,7 +33,8 @@ type NonBlocking struct {
 // NonBlockingConfig is used to configure the creation of a NonBlocking instance.
 type NonBlockingConfig struct {
 	// Timeout will define the timeout to wait on a Read call before returning deadline exceeded error.
-	// If is zero a default value will be chosen.
+	// If Timeout is zero then Read calls will return immediately and only have an error if the Reader
+	// was closed or EOFed.
 	Timeout time.Duration
 	// MaxBuffered specifies the maximum amount of bytes to have buffered in our reader.
 	// After MaxBuffered is reached a NonBlocking will sleep until the caller has read bytes
@@ -50,9 +51,6 @@ func NewNonBlocking(rwc io.ReadWriteCloser, cfg NonBlockingConfig) *NonBlocking 
 	}
 	if cfg.Timeout < 0 || cfg.MaxBuffered < 0 {
 		panic("invalid argument to NewNonBlocking")
-	}
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 1500 * time.Millisecond
 	}
 	nb := &NonBlocking{
 		io:             rwc,
@@ -94,6 +92,13 @@ func (nb *NonBlocking) Write(b []byte) (int, error) {
 
 // Read implements the [io.Reader] interface. Will call NonBlocking.ReadDeadline with the set timeout.
 func (nb *NonBlocking) Read(b []byte) (int, error) {
+	if nb.defaultTimeout == 0 {
+		// Fast track for no-timeouts configuration.
+		nb.mu.Lock()
+		defer nb.mu.Unlock()
+		n, _ := nb.buf.Read(b)
+		return n, nb.errfield
+	}
 	deadline := time.Now().Add(nb.defaultTimeout)
 	return nb.ReadDeadline(b, deadline)
 }
