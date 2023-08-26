@@ -1,8 +1,12 @@
 package cereal_test
 
 import (
+	"bytes"
 	"flag"
+	"io"
 	"log"
+	"math/rand"
+	"testing"
 	"time"
 
 	"github.com/soypat/cereal"
@@ -58,4 +62,38 @@ func ExampleForEachPort() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func TestNonBlocking(t *testing.T) {
+	var data [1024]byte
+	for i := range data {
+		data[i] = byte(rand.Intn(256))
+	}
+	buf := bytes.NewBuffer(data[:])
+	bbuf := nop{
+		ReadWriter: buf,
+		Closer:     io.NopCloser(buf),
+	}
+
+	nb := cereal.NewNonBlocking(bbuf, cereal.NonBlockingConfig{})
+
+	smallbuf := make([]byte, 31)
+	n := 0
+	for n < len(data) {
+		nn, err := nb.Read(smallbuf[:])
+		got := smallbuf[:nn]
+		expect := data[n : n+nn]
+		if !bytes.Equal(got, expect) {
+			t.Fatalf("mismatch in data read:\n%q\n%q", got, expect)
+		}
+		if err != nil {
+			t.Error(err)
+			break
+		}
+	}
+}
+
+type nop struct {
+	io.ReadWriter
+	io.Closer
 }
