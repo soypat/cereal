@@ -76,7 +76,9 @@ func TestNonBlockingRead(t *testing.T) {
 		Closer:     io.NopCloser(buf),
 	}
 
-	nb := cereal.NewNonBlocking(bbuf, cereal.NonBlockingConfig{})
+	nb := cereal.NewNonBlocking(bbuf, cereal.NonBlockingConfig{
+		ReadTimeout: time.Millisecond,
+	})
 
 	smallbuf := make([]byte, 31)
 	n := 0
@@ -99,7 +101,7 @@ func TestNonBlockingBlocked(t *testing.T) {
 	t.Parallel()
 	const (
 		block   = 100 * time.Millisecond
-		timeout = time.Millisecond
+		timeout = 5 * time.Millisecond
 		data    = "hello partner!"
 	)
 	rwc := &readwritecloser{
@@ -133,7 +135,7 @@ func TestNonBlockingReset(t *testing.T) {
 	t.Parallel()
 	const (
 		block   = 100 * time.Millisecond
-		timeout = time.Millisecond
+		timeout = 5 * time.Millisecond
 		data    = "hello partner!"
 	)
 	rwc := &readwritecloser{
@@ -152,7 +154,7 @@ func TestNonBlockingReset(t *testing.T) {
 	if n != 0 || err == nil {
 		t.Fatal("unexpected NonBlocking behaviour", n, err)
 	}
-	time.Sleep(block - timeout)
+	time.Sleep(block)
 	nb.Reset()
 	n, _ = nb.Read(buf)
 	if n != 0 {
