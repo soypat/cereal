@@ -98,7 +98,7 @@ func TestNonBlockingRead(t *testing.T) {
 func TestNonBlockingBlocked(t *testing.T) {
 	t.Parallel()
 	const (
-		block   = 200 * time.Millisecond
+		block   = 100 * time.Millisecond
 		timeout = time.Millisecond
 		data    = "hello partner!"
 	)
@@ -126,6 +126,37 @@ func TestNonBlockingBlocked(t *testing.T) {
 
 	if string(buf) != data {
 		t.Errorf("expected %q; got %q", data, buf)
+	}
+}
+
+func TestNonBlockingReset(t *testing.T) {
+	t.Parallel()
+	const (
+		block   = 100 * time.Millisecond
+		timeout = time.Millisecond
+		data    = "hello partner!"
+	)
+	rwc := &readwritecloser{
+		read: func(b []byte) (int, error) {
+			time.Sleep(block)
+			return copy(b, data), nil
+		},
+	}
+
+	nb := cereal.NewNonBlocking(rwc, cereal.NonBlockingConfig{
+		Timeout: timeout,
+	})
+	// This call should fail with deadline exceeded.
+	buf := make([]byte, len(data))
+	n, err := nb.Read(buf)
+	if n != 0 || err == nil {
+		t.Fatal("unexpected NonBlocking behaviour", n, err)
+	}
+	time.Sleep(block - timeout)
+	nb.Reset()
+	n, _ = nb.Read(buf)
+	if n != 0 {
+		t.Fatal("expected data to have been completely reset, got", string(buf[:n]))
 	}
 }
 

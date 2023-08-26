@@ -98,7 +98,7 @@ func (nb *NonBlocking) Read(b []byte) (int, error) {
 	return nb.ReadDeadline(b, deadline)
 }
 
-// ReadDeadline reads from the underlying buffer up untile deadline.
+// ReadDeadline reads from the underlying buffer up until the deadline.
 func (nb *NonBlocking) ReadDeadline(b []byte, deadline time.Time) (n int, err error) {
 	for err == nil && n < len(b) {
 		var nn int
@@ -148,6 +148,15 @@ func (nb *NonBlocking) Buffered() int {
 func (nb *NonBlocking) Close() error {
 	nb.setErr(io.EOF)
 	return nb.io.Close()
+}
+
+// Reset resets the underlying buffer to be empty, discarding all data read.
+// Reset is useful for message-based protocols where a slow response that timed out
+// can be interpreted as a response to the next call to Read.
+func (nb *NonBlocking) Reset() {
+	nb.mu.Lock()
+	defer nb.mu.Unlock()
+	nb.buf.Reset()
 }
 
 // err returns error set by setErr. If err is set read goroutine is done or in process of ending.
