@@ -1,4 +1,4 @@
-//go:build !(arm && !cgo)
+//go:build cgo
 
 package cereal
 

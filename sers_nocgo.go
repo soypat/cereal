@@ -1,4 +1,4 @@
-//go:build arm && !cgo
+//go:build !cgo
 
 package cereal
 
@@ -8,7 +8,7 @@ import (
 	"github.com/distributed/sers"
 )
 
-var serserr = errors.New("github.com/distributed/sers.OpenPort not supported for ARM without CGo")
+var serserr = errors.New("github.com/distributed/sers.OpenPort requires CGO")
 
 func openSers(portname string) (sers.SerialPort, error) {
 	return nil, serserr
