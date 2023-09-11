@@ -110,6 +110,9 @@ func (nb *NonBlocking) ReadDeadline(b []byte, deadline time.Time) (n int, err er
 		nn, err = nb.readNext(b[n:], deadline)
 		n += nn
 	}
+	if n != 0 {
+		return n, nil // Do not return error on an actual read.
+	}
 	if nb.err() != nil && n == 0 && err == nil {
 		// Early setting of the error if the reader has failed and no more bytes are being read.
 		// This means that the reader is likely done.

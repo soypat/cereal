@@ -90,10 +90,18 @@ func TestNonBlockingRead(t *testing.T) {
 		if !bytes.Equal(got, expect) {
 			t.Fatalf("mismatch in data read:\n%q\n%q", got, expect)
 		}
+		if err != nil && n != 0 {
+			t.Error("expected no error on non-zero read with blocking timeout")
+		}
 		if err != nil && n != len(data) {
 			t.Error(err)
 			break
 		}
+	}
+	nb.Close()
+	_, err := nb.Read(smallbuf[:])
+	if err != io.EOF {
+		t.Error("expected EOF returned on close")
 	}
 }
 
