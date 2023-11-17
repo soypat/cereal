@@ -3,6 +3,7 @@ package cereal
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -34,11 +35,16 @@ type NonBlocking struct {
 type NonBlockingConfig struct {
 	// ReadTimeout will define the timeout to wait on a Read call before returning deadline exceeded error.
 	// If ReadTimeout is zero then Read calls will return immediately and only have an error if the Reader
-	// was closed or EOFed.
+	// was closed or EOFed. This value loosely corresponds to VTIME in termios.
 	ReadTimeout time.Duration
+
+	// MaxReadSize determines the size of each individual read. If set to zero a suitable size will be chosen.
+	// This value loosely corresponds to VMIN in termios.
+	MaxReadSize int
+
 	// MaxReadBuffered specifies the maximum amount of bytes to have buffered in our reader.
 	// After MaxReadBuffered is reached a NonBlocking will sleep until the caller has read bytes
-	// and made space for more reads. If set to zero no limit will be placed on buffer size.
+	// and made space for more reads. If set to zero a suitable size will be chosen.
 	MaxReadBuffered int
 }
 
@@ -49,39 +55,53 @@ func NewNonBlocking(rwc io.ReadWriteCloser, cfg NonBlockingConfig) *NonBlocking 
 	if rwc == nil {
 		panic("nil ReadWriteCloser passed into NewNonBlocking")
 	}
-	if cfg.ReadTimeout < 0 || cfg.MaxReadBuffered < 0 {
+	if cfg.ReadTimeout < 0 || cfg.MaxReadBuffered < 0 || cfg.MaxReadSize < 0 {
 		panic("invalid argument to NewNonBlocking")
+	}
+	if cfg.MaxReadBuffered == 0 {
+		cfg.MaxReadBuffered = 32 * 1024 // Suitable size.
+	}
+	if cfg.MaxReadSize == 0 {
+		cfg.MaxReadSize = 1024 //
 	}
 	nb := &NonBlocking{
 		io:             rwc,
 		defaultTimeout: cfg.ReadTimeout,
 		maxBuffered:    cfg.MaxReadBuffered,
 	}
-	go func() {
-		const busySleep = 256 * time.Millisecond
-		var buf [1024]byte
+
+	go func(vmin int) {
+		defer func() {
+			// Goroutines can crash entire programs if they panic and are not recovered.
+			if r := recover(); r != nil {
+				nb.setErr(fmt.Errorf("panic in NonBlocking read goroutine: %v", r))
+			}
+		}()
+		backoff := exponentialBackoff{
+			MaxWait:   150 * time.Millisecond,
+			StartWait: 1 * time.Nanosecond,
+		}
+		buf := make([]byte, vmin)
 		for nb.err() == nil {
-			if nb.maxBuffered != 0 && nb.Buffered() > nb.maxBuffered {
-				time.Sleep(busySleep) // This busy sleep is to not blow up our buffer.
+			if nb.maxBuffered != 0 && nb.Buffered() >= nb.maxBuffered {
+				// Our buffer is full, sleep until the caller has read bytes.
+				backoff.Miss()
 				continue
 			}
 			n, err := nb.io.Read(buf[:])
+			nb.bufwrite(buf[:n])
 			if err != nil && errors.Is(err, io.EOF) {
-				nb.mu.Lock()
-				nb.buf.Write(buf[:n])
-				nb.mu.Unlock()
 				nb.setErr(err) // Our Reader is done. Nothing more to do here.
 				return
 			}
 			if n == 0 {
-				time.Sleep(busySleep) // An empty read is a good indicator that nothing much is happening on bus, so sleep.
+				// An empty read is a good indicator that nothing much is happening on bus, so sleep.
+				backoff.Miss()
 				continue
 			}
-			nb.mu.Lock()
-			nb.buf.Write(buf[:n])
-			nb.mu.Unlock()
+			backoff.Hit()
 		}
-	}()
+	}(cfg.MaxReadSize)
 	return nb
 }
 
@@ -180,9 +200,57 @@ func (nb *NonBlocking) setErr(err error) {
 	nb.errfield = err
 }
 
+func (nb *NonBlocking) bufwrite(b []byte) {
+	nb.mu.Lock()
+	defer nb.mu.Unlock()
+	nb.buf.Write(b)
+}
+
 func minD(a, b time.Duration) time.Duration {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+// exponentialBackoff implements a [Exponential Backoff]
+// delay algorithm to prevent saturation network or processor
+// with failing tasks. An exponentialBackoff with a non-zero MaxWait is ready for use.
+//
+// [Exponential Backoff]: https://en.wikipedia.org/wiki/Exponential_backoff
+type exponentialBackoff struct {
+	// Wait defines the amount of time that Miss will wait on next call.
+	Wait time.Duration
+	// Maximum allowable value for Wait.
+	MaxWait time.Duration
+	// StartWait is the value that Wait takes after a call to Hit.
+	StartWait time.Duration
+	// ExpMinusOne is the shift performed on Wait minus one, so the zero value performs a shift of 1.
+	ExpMinusOne uint32
+}
+
+// Hit sets eb.Wait to the StartWait value.
+func (eb *exponentialBackoff) Hit() {
+	if eb.MaxWait == 0 {
+		panic("MaxWait cannot be zero")
+	}
+	eb.Wait = eb.StartWait
+}
+
+// Miss sleeps for eb.Wait and increases eb.Wait exponentially.
+func (eb *exponentialBackoff) Miss() {
+	const k = 1
+	wait := eb.Wait
+	maxWait := eb.MaxWait
+	exp := eb.ExpMinusOne + 1
+	if maxWait == 0 {
+		panic("MaxWait cannot be zero")
+	}
+	time.Sleep(wait)
+	wait |= time.Duration(k)
+	wait <<= exp
+	if wait > maxWait {
+		wait = maxWait
+	}
+	eb.Wait = wait
 }
