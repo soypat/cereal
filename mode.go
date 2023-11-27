@@ -3,8 +3,6 @@ package cereal
 import (
 	"errors"
 	"time"
-
-	bugst "go.bug.st/serial"
 )
 
 // Mode is the configuration for the serial port.
@@ -14,6 +12,8 @@ type Mode struct {
 	DataBits int
 	// ReadTimeout is the maximum time to wait for a read to complete.
 	// May not be implemented on all platforms or Opener implementations.
+	//
+	// This value corresponds to VTIM in termios implementations.
 	ReadTimeout time.Duration
 	Parity      Parity
 	StopBits    StopBits
@@ -21,6 +21,11 @@ type Mode struct {
 
 var (
 	errReadTimeoutUnsupportedBugst = errors.New("read timeout not supported for Opener implementation. Use a different Opener")
+	errUnsupportedStopbits         = errors.New("stop bits unsupported")
+	errInvalidStopbits             = errors.New("invalid stop bits")
+
+	errUnsupportedParity = errors.New("unsupported parity")
+	errInvalidParity     = errors.New("invalid parity")
 )
 
 // StopBits is the number of stop bits to use- is a enum so use package defined
@@ -28,9 +33,9 @@ var (
 type StopBits byte
 
 const (
-	StopBits1     = StopBits(bugst.OneStopBit)
-	StopBits1Half = StopBits(bugst.OnePointFiveStopBits)
-	StopBits2     = StopBits(bugst.TwoStopBits)
+	StopBits1 StopBits = iota
+	StopBits1Half
+	StopBits2
 )
 
 // String returns a human readable representation of the stop bits.
@@ -43,7 +48,7 @@ func (s StopBits) String() (str string) {
 	case StopBits2:
 		str = "2"
 	default:
-		str = "Unknown"
+		str = "<invalid stopbits>"
 	}
 	return str
 }
@@ -58,7 +63,7 @@ func (s StopBits) Halves() (halves int) {
 	case StopBits2:
 		halves = 4
 	}
-	return halves
+	return 0
 }
 
 // Parity is the type of parity to use- is a enum so use package defined
@@ -66,35 +71,33 @@ func (s StopBits) Halves() (halves int) {
 type Parity byte
 
 const (
-	ParityNone  = Parity(bugst.NoParity)
-	ParityOdd   = Parity(bugst.OddParity)
-	ParityEven  = Parity(bugst.EvenParity)
-	ParityMark  = Parity(bugst.MarkParity)
-	ParitySpace = Parity(bugst.SpaceParity)
+	ParityNone Parity = iota
+	ParityOdd
+	ParityEven
+	ParityMark
+	ParitySpace
 )
+
+var parityTable = [...]string{
+	ParityNone:  "None",
+	ParityOdd:   "Odd",
+	ParityEven:  "Even",
+	ParityMark:  "Mark",
+	ParitySpace: "Space",
+}
 
 // String returns a human readable representation of the parity.
 func (p Parity) String() (s string) {
-	switch p {
-	case ParityNone:
-		s = "None"
-	case ParityOdd:
-		s = "Odd"
-	case ParityEven:
-		s = "Even"
-	case ParityMark:
-		s = "Mark"
-	case ParitySpace:
-		s = "Space"
-	default:
-		s = "Unknown"
+	if int(p) >= len(parityTable) || parityTable[p] == "" {
+		return "<invalid parity>"
 	}
-	return s
+	return parityTable[p]
 }
 
 func (p Parity) Char() (char byte) {
-	if p > ParitySpace {
+	str := p.String()
+	if str[0] == '<' {
 		return '?'
 	}
-	return []byte{'N', 'O', 'E', 'M', 'S'}[p]
+	return str[0]
 }

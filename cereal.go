@@ -35,11 +35,28 @@ type PortDetails struct {
 // ForEachPort returns early with fn's error if fn returns an error or
 // if halt is true.
 func ForEachPort(fn func(details PortDetails) (halt bool, err error)) error {
-	portlist, err := enumerator.GetDetailedPortsList()
+	detailedList, err := enumerator.GetDetailedPortsList()
 	if err != nil {
 		return err
 	}
-	for _, port := range portlist {
+
+	// Add missing non-detailed to the list of detailed ports. On windows COM ports may be missing.
+	simpleList, err := bugst.GetPortsList()
+	if err == nil {
+		for _, portname := range simpleList {
+			contained := false
+			for _, detailedPort := range detailedList {
+				if detailedPort.Name == portname {
+					contained = true
+					break
+				}
+			}
+			if !contained {
+				detailedList = append(detailedList, &enumerator.PortDetails{Name: portname})
+			}
+		}
+	}
+	for _, port := range detailedList {
 		vid, _ := strconv.ParseUint(port.VID, 16, 16)
 		pid, _ := strconv.ParseUint(port.PID, 16, 16)
 		halt, err := fn(PortDetails{
@@ -65,11 +82,38 @@ func (Bugst) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 	if mode.ReadTimeout != 0 {
 		return nil, errReadTimeoutUnsupportedBugst
 	}
+	var parity bugst.Parity
+	switch mode.Parity {
+	case ParityNone:
+		parity = bugst.NoParity
+	case ParityOdd:
+		parity = bugst.OddParity
+	case ParityEven:
+		parity = bugst.EvenParity
+	case ParityMark:
+		parity = bugst.MarkParity
+	case ParitySpace:
+		parity = bugst.SpaceParity
+	default:
+		return nil, errInvalidParity
+	}
+
+	var stopbits bugst.StopBits
+	switch mode.StopBits {
+	case StopBits1:
+		stopbits = bugst.OneStopBit
+	case StopBits1Half:
+		stopbits = bugst.OnePointFiveStopBits
+	case StopBits2:
+		stopbits = bugst.TwoStopBits
+	default:
+		return nil, errInvalidStopbits
+	}
 	return bugst.Open(portname, &bugst.Mode{
 		BaudRate: mode.BaudRate,
 		DataBits: mode.DataBits,
-		Parity:   bugst.Parity(mode.Parity),
-		StopBits: bugst.StopBits(mode.StopBits),
+		Parity:   parity,
+		StopBits: stopbits,
 	})
 }
 
@@ -110,7 +154,7 @@ func (Goburrow) PackagePath() string { return "github.com/goburrow/serial" }
 
 func (Goburrow) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 	if mode.StopBits == StopBits1Half {
-		return nil, errors.New("unsupported stop bits")
+		return nil, errUnsupportedStopbits
 	}
 	return goburrow.Open(&goburrow.Config{
 		Address:  portname,
@@ -152,9 +196,9 @@ func (Sers) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 	case ParityEven:
 		parity = sers.E
 	case ParityMark, ParitySpace:
-		return nil, errors.New("unsupported parity")
+		return nil, errUnsupportedParity
 	default:
-		return nil, errors.New("invalid parity")
+		return nil, errInvalidParity
 	}
 	switch mode.StopBits {
 	case StopBits1:
@@ -162,9 +206,9 @@ func (Sers) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 	case StopBits2:
 		stopbits = 2
 	case StopBits1Half:
-		return nil, errors.New("unsupported stop bits")
+		return nil, errUnsupportedStopbits
 	default:
-		return nil, errors.New("invalid stop bits")
+		return nil, errInvalidStopbits
 	}
 	err = sp.SetMode(mode.BaudRate, databits, parity, stopbits, sers.NO_HANDSHAKE)
 	if err != nil {
@@ -172,4 +216,38 @@ func (Sers) OpenPort(portname string, mode Mode) (io.ReadWriteCloser, error) {
 		return nil, err
 	}
 	return sp, nil
+}
+
+// ResetInputBuffer discards data received but not read by the port. It expects a port type
+// or an interface that implements `Reset()`/`Reset() error`/`ResetInputBuffer() error`. An error is returned
+// if the functionality is not implemented by the port.
+func ResetInputBuffer(port io.Reader) error {
+	// Test for common ports
+	switch r := port.(type) {
+	case sers.SerialPort, *tarm.Port, goburrow.Port:
+		return errors.New("cereal: sers/tarm/goburrow does not support ResetInputBuffer")
+	case bugst.Port:
+		return r.ResetInputBuffer()
+	case *NonBlocking:
+		r.Reset()
+		return nil
+	}
+	type resetter interface {
+		Reset()
+	}
+	type resetterErr interface {
+		Reset() error
+	}
+	type resetInputBuffer interface {
+		ResetInputBuffer() error
+	}
+	if r, ok := port.(resetter); ok {
+		r.Reset()
+		return nil
+	} else if r, ok := port.(resetterErr); ok {
+		return r.Reset()
+	} else if r, ok := port.(resetInputBuffer); ok {
+		return r.ResetInputBuffer()
+	}
+	return errors.New("cereal: ResetInputBuffer not implemented by argument")
 }
